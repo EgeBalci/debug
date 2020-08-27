@@ -9,7 +9,9 @@ import (
 	"bytes"
 	"compress/zlib"
 	"debug/dwarf"
+	"debug/pe"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -463,6 +465,115 @@ func (f *File) ImportedSymbols() ([]string, error) {
 	}
 
 	return all, nil
+}
+
+// CreateMemoryMapping creates a memory mapping for the given PE image
+func (f *File) CreateMemoryMapping() ([]byte, error) {
+
+	memMap := bytes.Buffer{}
+
+	var (
+		offset        uint64
+		imageBase     uint64
+		sizeOfImage   uint32
+		sizeOfHeaders uint32
+	)
+
+	switch hdr := (f.OptionalHeader).(type) {
+	case *pe.OptionalHeader32:
+		// cast those back to a uint32 before use in 32bit
+		imageBase = uint64(hdr.ImageBase)
+		sizeOfImage = hdr.SizeOfImage
+		sizeOfHeaders = hdr.SizeOfHeaders
+		break
+	case *pe.OptionalHeader64:
+		imageBase = hdr.ImageBase
+		sizeOfImage = hdr.SizeOfImage
+		sizeOfHeaders = hdr.SizeOfHeaders
+		break
+	}
+
+	offset = imageBase
+
+	rawPE, err := f.Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	memMap.Write(rawPE[0:int(sizeOfHeaders)])
+	offset += uint64(sizeOfHeaders)
+	for _, sec := range f.Sections {
+		// Append null bytes if there is a gap between sections or PE header
+		for offset < (uint64(sec.VirtualAddress) + imageBase) {
+			memMap.WriteString(string(0x00))
+			offset++
+		}
+		// Map the section
+		section, err := sec.Data()
+		if err != nil {
+			return nil, err
+		}
+		_, err = memMap.Write(section)
+		if err != nil {
+			return nil, err
+		}
+		offset += uint64(sec.Size)
+		// Append null bytes until reaching the end of the virtual address of the section
+		for offset < (uint64(sec.VirtualAddress) + uint64(sec.VirtualSize) + imageBase) {
+			memMap.WriteString(string(0x00))
+			offset++
+		}
+
+	}
+
+	for (offset - imageBase) < uint64(sizeOfImage) {
+		memMap.WriteString(string(0x00))
+		offset++
+	}
+	return memMap.Bytes(), nil
+}
+
+// PerformIntegrityChecks validates the integrity of the mapped PE image
+func (f *File) PerformIntegrityChecks(image []byte) error {
+
+	memMap := bytes.Buffer{}
+	_, err := memMap.Write(image)
+	if err != nil {
+		return err
+	}
+
+	var sizeOfImage uint32
+
+	switch hdr := (f.OptionalHeader).(type) {
+	case *pe.OptionalHeader32:
+		// cast those back to a uint32 before use in 32bit
+		sizeOfImage = hdr.SizeOfImage
+		break
+	case *pe.OptionalHeader64:
+		sizeOfImage = hdr.SizeOfImage
+		break
+	}
+
+	if int(sizeOfImage) != memMap.Len() {
+		return errors.New("integrity checks failed: Mapping size does not match the size of image header")
+	}
+
+	rawPE, err := f.Bytes()
+	if err != nil {
+		return err
+	}
+
+	for _, j := range f.Sections {
+		for k := 0; k < int(j.Size); k++ {
+			buffer := memMap.Bytes()
+			if rawPE[int(j.Offset)+k] != buffer[int(j.VirtualAddress)+k] {
+				return errors.New("integrity checks failed: Broken section alignment at" + j.Name)
+			}
+		}
+
+	}
+
+	return nil
 }
 
 // ImportedLibraries returns the names of all libraries
