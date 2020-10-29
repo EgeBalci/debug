@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -23,6 +24,7 @@ const seekStart = 0
 
 // A File represents an open PE file.
 type File struct {
+	RawBytes []byte
 	DosHeader
 	DosExists  bool
 	DosStub    [64]byte // TODO(capnspacehook) make slice and correctly parse any DOS stub
@@ -47,7 +49,11 @@ func Open(name string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	ff, err := NewFile(f)
+	raw, err := ioutil.ReadFile(name)
+	if err != nil {
+		return nil, err
+	}
+	ff, err := NewFile(f, raw)
 	if err != nil {
 		f.Close()
 		return nil, err
@@ -76,8 +82,9 @@ var (
 // TODO(brainman): add Load function, as a replacement for NewFile, that does not call removeAuxSymbols (for performance)
 
 // NewFile creates a new File for accessing a PE binary in an underlying reader.
-func NewFile(r io.ReaderAt) (*File, error) {
+func NewFile(r io.ReaderAt, raw []byte) (*File, error) {
 	f := new(File)
+	f.RawBytes = raw
 	sr := io.NewSectionReader(r, 0, 1<<63-1)
 
 	binary.Read(sr, binary.LittleEndian, &f.DosHeader)
@@ -495,10 +502,7 @@ func (f *File) CreateMemoryMapping() ([]byte, error) {
 
 	offset = imageBase
 
-	rawPE, err := f.Bytes()
-	if err != nil {
-		return nil, err
-	}
+	rawPE := f.RawBytes
 
 	memMap.Write(rawPE[0:int(sizeOfHeaders)])
 	offset += uint64(sizeOfHeaders)
