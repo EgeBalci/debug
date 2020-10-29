@@ -486,24 +486,24 @@ func (f *File) CreateMemoryMapping() ([]byte, error) {
 		sizeOfHeaders uint32
 	)
 
-	switch hdr := (f.OptionalHeader).(type) {
-	case *pe.OptionalHeader32:
+	switch f.FileHeader.Machine {
+	case IMAGE_FILE_MACHINE_I386:
 		// cast those back to a uint32 before use in 32bit
-		imageBase = uint64(hdr.ImageBase)
-		sizeOfImage = hdr.SizeOfImage
-		sizeOfHeaders = hdr.SizeOfHeaders
+		opt := f.OptionalHeader.(*OptionalHeader32)
+		imageBase = uint64(opt.ImageBase)
+		sizeOfImage = opt.SizeOfImage
+		sizeOfHeaders = opt.SizeOfHeaders
 		break
-	case *pe.OptionalHeader64:
-		imageBase = hdr.ImageBase
-		sizeOfImage = hdr.SizeOfImage
-		sizeOfHeaders = hdr.SizeOfHeaders
+	case IMAGE_FILE_MACHINE_AMD64:
+		opt := f.OptionalHeader.(*OptionalHeader64)
+		imageBase = opt.ImageBase
+		sizeOfImage = opt.SizeOfImage
+		sizeOfHeaders = opt.SizeOfHeaders
 		break
 	}
 
 	offset = imageBase
-
 	rawPE := f.RawBytes
-
 	memMap.Write(rawPE[0:int(sizeOfHeaders)])
 	offset += uint64(sizeOfHeaders)
 	for _, sec := range f.Sections {
