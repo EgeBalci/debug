@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"debug/dwarf"
-	"debug/pe"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -548,13 +547,15 @@ func (f *File) PerformIntegrityChecks(image []byte) error {
 
 	var sizeOfImage uint32
 
-	switch hdr := (f.OptionalHeader).(type) {
-	case *pe.OptionalHeader32:
+	switch f.FileHeader.Machine {
+	case IMAGE_FILE_MACHINE_I386:
 		// cast those back to a uint32 before use in 32bit
-		sizeOfImage = hdr.SizeOfImage
+		opt := f.OptionalHeader.(*OptionalHeader32)
+		sizeOfImage = opt.SizeOfImage
 		break
-	case *pe.OptionalHeader64:
-		sizeOfImage = hdr.SizeOfImage
+	case IMAGE_FILE_MACHINE_AMD64:
+		opt := f.OptionalHeader.(*OptionalHeader64)
+		sizeOfImage = opt.SizeOfImage
 		break
 	}
 
